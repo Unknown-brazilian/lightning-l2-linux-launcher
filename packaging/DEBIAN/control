@@ -1,0 +1,12 @@
+Package: lightning-l2-launcher
+Version: 1.3
+Section: games
+Priority: optional
+Architecture: amd64
+Depends: curl, tar, xz-utils, winetricks, cabextract, unzip, ca-certificates, zenity
+Maintainer: Lightning-L2 <admin@lightning-l2.com>
+Description: Lightning-L2 Linux Launcher
+ One-click launcher for the Lightning-L2 Lineage II High Five private
+ server on Linux. Sets up a dedicated Wine-GE + DXVK environment on
+ first run, points at your existing Lineage II High Five client
+ install, and overlays the Lightning-L2 Linux-compatible system patch.

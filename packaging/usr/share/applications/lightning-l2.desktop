@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Lightning-L2
+Comment=Play Lineage II on the Lightning-L2 server
+Exec=/opt/lightning-l2/launch.sh
+Icon=lightning-l2
+Terminal=true
+Type=Application
+Categories=Game;
+StartupNotify=true
