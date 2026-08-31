@@ -35,6 +35,7 @@ The obvious path — a Windows VM — works, but with three real costs: hypervis
 - **A Wine loader-lock deadlock** during GameGuard's init (a thread-creation-during-DLL-init pattern that recent stock Wine handles more strictly than real Windows does, causing a permanent hang). Wine-GE's extra compatibility patches sail through it; stock Wine 9.0 does not.
 - **An X11/NV-GLX `BadMatch` crash** from the client's legacy fixed-function Direct3D 9 renderer fighting GLX pixel-format negotiation on modern NVIDIA drivers. DXVK sidesteps this entirely by talking to Vulkan directly instead of going through GLX.
 - **Silently missing UI/login text.** The client renders most of its interface fine but pulls certain text through the Windows font system, specifically asking for Tahoma — which isn't part of any default Wine or Linux font set and has to be installed separately.
+- **A crash when destroying an inventory item.** That confirmation dialog goes through an `XMLDocument::Load` call that needs MSXML registered as a proper COM server — having the DLL physically present in the game folder isn't enough, and Wine doesn't register it by default. `winetricks msxml4 msxml6` fixes it.
 
 None of these are Lightning-L2-specific bugs — they're generic "old D3D9 Windows game on modern Linux" pain points — but they took real trial and error to isolate individually, which is the whole reason this exists as a packaged, one-click tool instead of a paragraph of manual instructions.
 
