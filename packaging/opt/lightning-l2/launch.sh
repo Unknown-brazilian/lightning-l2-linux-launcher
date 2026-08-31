@@ -45,6 +45,18 @@ fi
 
 CLIENT_DIR=$(grep '^CLIENT_DIR=' "$CONFIG_FILE" | cut -d= -f2-)
 
+# Small one-off patches for installs that already ran setup.sh before a fix
+# was added to it - each runs at most once, tracked by its own marker, so
+# updating the .deb doesn't force a full from-scratch re-setup.
+MSXML_PATCHED="$INSTALL_DIR/.msxml_patched"
+if [ ! -f "$MSXML_PATCHED" ]; then
+    echo "[Lightning-L2] One-time fix: registering MSXML (destroy-item crash)..."
+    export WINEPREFIX WINE="$WINE_GE_DIR/bin/wine" WINESERVER="$WINE_GE_DIR/bin/wineserver"
+    export PATH="$WINE_GE_DIR/bin:$PATH"
+    winetricks --unattended msxml4 msxml6 >/dev/null 2>&1 || true
+    touch "$MSXML_PATCHED"
+fi
+
 # Offer a Desktop shortcut once, after the player has something working.
 if [ ! -f "$SHORTCUT_ASKED" ]; then
     mkdir -p "$CONFIG_DIR"

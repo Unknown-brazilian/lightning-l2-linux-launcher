@@ -73,6 +73,9 @@ export PATH="$WINE_GE_DIR/bin:$PATH"
 echo "80"; echo "# Installing Tahoma font (fixes missing UI text)..."
 winetricks --unattended tahoma >/dev/null 2>&1
 
+echo "85"; echo "# Registering MSXML (fixes a crash on destroying items)..."
+winetricks --unattended msxml4 msxml6 >/dev/null 2>&1
+
 echo "90"; echo "# Installing DXVK (Direct3D->Vulkan translation)..."
 curl -fSL -o "$INSTALL_DIR/dxvk.tar.gz" "$DXVK_URL"
 mkdir -p "$INSTALL_DIR/dxvk"
