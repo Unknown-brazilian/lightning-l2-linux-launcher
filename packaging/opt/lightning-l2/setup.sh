@@ -53,6 +53,18 @@ curl -fSL -o "$INSTALL_DIR/system-patch.zip" "$SYSTEM_PATCH_URL"
 echo "30"; echo "# Applying system patch..."
 unzip -o -q "$INSTALL_DIR/system-patch.zip" -d "$CLIENT_DIR"
 
+# A pre-existing, differently-cased file (e.g. "ItemName-E.DAT" from
+# whatever client source this player started from) doesn't get overwritten
+# by unzip on this case-sensitive filesystem - it just sits alongside the
+# correct one, and which file Wine actually reads is undefined. Clean up
+# any case-duplicate of ItemName-e.dat specifically (same reasoning as
+# launch.sh's own re-sync path) so there's exactly one, unambiguous copy.
+for stale in "$CLIENT_DIR"/system/[Ii][Tt][Ee][Mm][Nn][Aa][Mm][Ee]-[Ee].[Dd][Aa][Tt]; do
+	[ -e "$stale" ] || continue
+	[ "$stale" = "$CLIENT_DIR/system/ItemName-e.dat" ] && continue
+	rm -f "$stale"
+done
+
 # Record the version we just applied, so launch.sh's own re-sync check
 # (see launch.sh) doesn't immediately re-download the exact same patch on
 # this install's very first launch. A failed fetch here just means the

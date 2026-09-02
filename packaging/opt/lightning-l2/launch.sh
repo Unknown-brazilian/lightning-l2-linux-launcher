@@ -74,18 +74,53 @@ fi
 # Entirely best-effort: any network failure here is silently ignored and
 # falls through to launching normally - never blocks play over a patch
 # check, and never touches CLIENT_DIR if REMOTE_VERSION comes back empty.
+#
+# IMPORTANT (fixed in v1.7, was a real bug in v1.5/v1.6): the version
+# marker must only ever be written after `unzip` itself reports success.
+# The original version did `unzip ... 2>/dev/null || true` and then wrote
+# the marker unconditionally - meaning a failed extraction (permissions,
+# a case-sensitivity mismatch between the zip's paths and an existing
+# differently-cased file on this Linux filesystem, disk full, etc.) still
+# got recorded as "up to date", silently and permanently masking the
+# failure - the exact class of bug this mechanism exists to prevent.
+echo "[Lightning-L2] Checking for system patch updates..."
 REMOTE_VERSION=$(curl -fsSL --max-time 5 "$SYSTEM_PATCH_VERSION_URL" 2>/dev/null || true)
 LOCAL_VERSION=$(cat "$SYSTEM_PATCH_VERSION_FILE" 2>/dev/null || true)
+echo "[Lightning-L2] Local system patch version: '${LOCAL_VERSION:-none}', remote: '${REMOTE_VERSION:-unreachable}'"
 if [ -n "$REMOTE_VERSION" ] && [ "$REMOTE_VERSION" != "$LOCAL_VERSION" ]; then
     echo "[Lightning-L2] System patch update available ($LOCAL_VERSION -> $REMOTE_VERSION) - re-syncing..."
     if curl -fsSL --max-time 60 -o "$INSTALL_DIR/system-patch.zip" "$SYSTEM_PATCH_URL" 2>/dev/null; then
-        unzip -o -q "$INSTALL_DIR/system-patch.zip" -d "$CLIENT_DIR" 2>/dev/null || true
-        rm -f "$CLIENT_DIR/system/npkcusb.sys" "$CLIENT_DIR/system/npkcrypt.sys" "$CLIENT_DIR/system/npkcrypt.vxd"
-        echo "$REMOTE_VERSION" > "$SYSTEM_PATCH_VERSION_FILE"
-        echo "[Lightning-L2] System patch updated to $REMOTE_VERSION."
+        UNZIP_ERR="$INSTALL_DIR/.system_patch_unzip_error.log"
+        if unzip -o -q "$INSTALL_DIR/system-patch.zip" -d "$CLIENT_DIR" 2>"$UNZIP_ERR"; then
+            rm -f "$UNZIP_ERR"
+            rm -f "$CLIENT_DIR/system/npkcusb.sys" "$CLIENT_DIR/system/npkcrypt.sys" "$CLIENT_DIR/system/npkcrypt.vxd"
+            # unzip succeeding doesn't guarantee the right file actually got
+            # overwritten - a Linux (case-sensitive) filesystem holding an
+            # existing "ItemName-E.DAT" or similar (differently-cased from
+            # this zip's "system/ItemName-e.dat") would just get a second,
+            # separate file created alongside it, not a real overwrite, and
+            # which one the client ends up reading under Wine is undefined.
+            # This exact class of bug already bit this project once before
+            # (case-duplicate files in a Wine-prefix client folder, found
+            # and cleaned up in an earlier session) - clean it up here too,
+            # keeping only the file this zip actually intends.
+            for stale in "$CLIENT_DIR"/system/[Ii][Tt][Ee][Mm][Nn][Aa][Mm][Ee]-[Ee].[Dd][Aa][Tt]; do
+                [ -e "$stale" ] || continue
+                [ "$stale" = "$CLIENT_DIR/system/ItemName-e.dat" ] && continue
+                echo "[Lightning-L2] Removing stale case-duplicate: $stale"
+                rm -f "$stale"
+            done
+            echo "$REMOTE_VERSION" > "$SYSTEM_PATCH_VERSION_FILE"
+            echo "[Lightning-L2] System patch updated to $REMOTE_VERSION."
+        else
+            echo "[Lightning-L2] System patch extraction failed - marker NOT updated, will retry next launch. unzip said:"
+            sed 's/^/[Lightning-L2]   /' "$UNZIP_ERR" 2>/dev/null || true
+        fi
     else
         echo "[Lightning-L2] Could not fetch system patch update - will retry next launch."
     fi
+else
+    echo "[Lightning-L2] System patch already up to date."
 fi
 
 # Offer a Desktop shortcut once, after the player has something working.
