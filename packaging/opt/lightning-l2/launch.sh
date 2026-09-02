@@ -103,13 +103,40 @@ if [ ! -f "$V18_FORCED_RESYNC" ]; then
     touch "$V18_FORCED_RESYNC"
 fi
 
+# v1.9: v1.8's forced re-sync above corrected a *wrong marker value*, but
+# it didn't help a different failure mode confirmed by a real report the
+# same day - the marker value was already technically correct (matched
+# the current remote version), yet the file it recorded came from a
+# stale CDN-cached zip fetched via the un-cache-busted bare URL (the bug
+# this version fixes, see below). A marker that already matches the
+# current version will never look "outdated" to the comparison below, so
+# it needs its own one-off forced discard too, same pattern as v1.8's -
+# this time the retry is guaranteed correct since the zip URL itself is
+# now cache-busted.
+V19_FORCED_RESYNC="$INSTALL_DIR/.v19_forced_resync_done"
+if [ ! -f "$V19_FORCED_RESYNC" ]; then
+    echo "[Lightning-L2] v1.9: discarding any existing system patch version marker to force one cache-safe re-sync..."
+    rm -f "$SYSTEM_PATCH_VERSION_FILE"
+    touch "$V19_FORCED_RESYNC"
+fi
+
 echo "[Lightning-L2] Checking for system patch updates..."
 REMOTE_VERSION=$(curl -fsSL --max-time 5 "$SYSTEM_PATCH_VERSION_URL" 2>/dev/null || true)
 LOCAL_VERSION=$(cat "$SYSTEM_PATCH_VERSION_FILE" 2>/dev/null || true)
 echo "[Lightning-L2] Local system patch version: '${LOCAL_VERSION:-none}', remote: '${REMOTE_VERSION:-unreachable}'"
 if [ -n "$REMOTE_VERSION" ] && [ "$REMOTE_VERSION" != "$LOCAL_VERSION" ]; then
     echo "[Lightning-L2] System patch update available ($LOCAL_VERSION -> $REMOTE_VERSION) - re-syncing..."
-    if curl -fsSL --max-time 60 -o "$INSTALL_DIR/system-patch.zip" "$SYSTEM_PATCH_URL" 2>/dev/null; then
+    # v1.9: the bare zip URL is cached at the edge (Cloudflare, up to 4h,
+    # confirmed live: cf-cache-status HIT serving a stale build after a
+    # real deploy) - only a *different* URL is guaranteed a cache miss.
+    # REMOTE_VERSION was just fetched from the version-check endpoint,
+    # which is never cached (no-store), so it's always the real current
+    # value - append it as a cache-busting query string on the actual zip
+    # download too, the same way connect.html's own download link already
+    # does. Without this, "update available, re-syncing" can silently
+    # apply a stale cached zip while still recording the new version as
+    # successfully applied - exactly what happened to a real player.
+    if curl -fsSL --max-time 60 -o "$INSTALL_DIR/system-patch.zip" "${SYSTEM_PATCH_URL}?v=${REMOTE_VERSION}" 2>/dev/null; then
         UNZIP_ERR="$INSTALL_DIR/.system_patch_unzip_error.log"
         if unzip -o -q "$INSTALL_DIR/system-patch.zip" -d "$CLIENT_DIR" 2>"$UNZIP_ERR"; then
             rm -f "$UNZIP_ERR"

@@ -48,7 +48,19 @@ fi
 #        what lets the client start cleanly under Wine-GE) ---
 (
 echo "10"; echo "# Downloading Lightning-L2 system patch..."
-curl -fSL -o "$INSTALL_DIR/system-patch.zip" "$SYSTEM_PATCH_URL"
+# v1.9: fetch the current version first (its own endpoint is never
+# cached) and use it to cache-bust the actual zip download - the bare
+# zip URL sits behind a CDN cache for hours, confirmed live to serve a
+# stale build after a real deploy. Falls back to the bare URL if the
+# version endpoint is unreachable, matching this script's existing
+# fail-forward style elsewhere - still correct on a fresh install where
+# nothing has ever been cached with the wrong content yet.
+CURRENT_PATCH_VERSION=$(curl -fsSL "$SYSTEM_PATCH_VERSION_URL" 2>/dev/null || true)
+if [ -n "$CURRENT_PATCH_VERSION" ]; then
+	curl -fSL -o "$INSTALL_DIR/system-patch.zip" "${SYSTEM_PATCH_URL}?v=${CURRENT_PATCH_VERSION}"
+else
+	curl -fSL -o "$INSTALL_DIR/system-patch.zip" "$SYSTEM_PATCH_URL"
+fi
 
 echo "30"; echo "# Applying system patch..."
 unzip -o -q "$INSTALL_DIR/system-patch.zip" -d "$CLIENT_DIR"
@@ -67,10 +79,16 @@ done
 
 # Record the version we just applied, so launch.sh's own re-sync check
 # (see launch.sh) doesn't immediately re-download the exact same patch on
-# this install's very first launch. A failed fetch here just means the
-# next launch's check does the (harmless, one-time-extra) re-download
-# instead - not worth failing setup over.
-curl -fsSL "$SYSTEM_PATCH_VERSION_URL" -o "$SYSTEM_PATCH_VERSION_FILE" 2>/dev/null || true
+# this install's very first launch. Reuses $CURRENT_PATCH_VERSION from
+# the fetch above (same value that was actually downloaded) rather than
+# querying again - avoids a pointless second network call and closes off
+# any chance of the two fetches disagreeing if a deploy happens to land
+# in between them. A missing value here just means the next launch's
+# check does the (harmless, one-time-extra) re-download instead - not
+# worth failing setup over.
+if [ -n "$CURRENT_PATCH_VERSION" ]; then
+	echo -n "$CURRENT_PATCH_VERSION" > "$SYSTEM_PATCH_VERSION_FILE"
+fi
 
 echo "40"; echo "# Removing Windows-only anti-cheat driver files..."
 rm -f "$CLIENT_DIR/system/npkcusb.sys" "$CLIENT_DIR/system/npkcrypt.sys" "$CLIENT_DIR/system/npkcrypt.vxd"
