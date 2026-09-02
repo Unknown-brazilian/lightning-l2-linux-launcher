@@ -9,6 +9,7 @@ set -o pipefail
 WINE_GE_URL="https://github.com/GloriousEggroll/wine-ge-custom/releases/download/GE-Proton8-26/wine-lutris-GE-Proton8-26-x86_64.tar.xz"
 DXVK_URL="https://github.com/doitsujin/dxvk/releases/download/v2.3.1/dxvk-2.3.1.tar.gz"
 SYSTEM_PATCH_URL="https://lightning-l2.com/lightning-l2-system.zip"
+SYSTEM_PATCH_VERSION_URL="https://lightning-l2.com/lightning-l2-system-version.txt"
 # -------------------------------------------------------------------
 
 INSTALL_DIR="$HOME/.local/share/lightning-l2"
@@ -17,6 +18,7 @@ CONFIG_FILE="$CONFIG_DIR/config"
 WINE_GE_DIR="$INSTALL_DIR/wine-ge"
 WINEPREFIX="$INSTALL_DIR/prefix"
 MARKER="$INSTALL_DIR/.setup_complete"
+SYSTEM_PATCH_VERSION_FILE="$INSTALL_DIR/.system_patch_version"
 
 mkdir -p "$INSTALL_DIR" "$CONFIG_DIR"
 
@@ -50,6 +52,13 @@ curl -fSL -o "$INSTALL_DIR/system-patch.zip" "$SYSTEM_PATCH_URL"
 
 echo "30"; echo "# Applying system patch..."
 unzip -o -q "$INSTALL_DIR/system-patch.zip" -d "$CLIENT_DIR"
+
+# Record the version we just applied, so launch.sh's own re-sync check
+# (see launch.sh) doesn't immediately re-download the exact same patch on
+# this install's very first launch. A failed fetch here just means the
+# next launch's check does the (harmless, one-time-extra) re-download
+# instead - not worth failing setup over.
+curl -fsSL "$SYSTEM_PATCH_VERSION_URL" -o "$SYSTEM_PATCH_VERSION_FILE" 2>/dev/null || true
 
 echo "40"; echo "# Removing Windows-only anti-cheat driver files..."
 rm -f "$CLIENT_DIR/system/npkcusb.sys" "$CLIENT_DIR/system/npkcrypt.sys" "$CLIENT_DIR/system/npkcrypt.vxd"
