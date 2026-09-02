@@ -83,6 +83,26 @@ fi
 # differently-cased file on this Linux filesystem, disk full, etc.) still
 # got recorded as "up to date", silently and permanently masking the
 # failure - the exact class of bug this mechanism exists to prevent.
+#
+# v1.8: v1.7's fix only stops *new* false-positive markers - it does
+# nothing for an install that already has one on disk from the buggy
+# v1.5/v1.6 code, which is exactly what a real report turned up: a
+# player's local marker already read the current version, but their
+# actual system/ItemName-e.dat on disk was still the untouched original
+# (proven by matching the pre-patch file's exact size and mtime) - v1.7
+# saw "already up to date" and skipped re-extracting forever. One-time,
+# marker-gated (same pattern as MSXML_PATCHED below): force exactly one
+# re-sync per install by discarding whatever SYSTEM_PATCH_VERSION_FILE
+# currently claims, so this class of already-poisoned marker gets
+# corrected once under the now-fixed exit-code-checked logic, without
+# forcing a full re-setup or re-forcing it on every future launch.
+V18_FORCED_RESYNC="$INSTALL_DIR/.v18_forced_resync_done"
+if [ ! -f "$V18_FORCED_RESYNC" ]; then
+    echo "[Lightning-L2] v1.8: discarding any existing system patch version marker to force one verified re-sync..."
+    rm -f "$SYSTEM_PATCH_VERSION_FILE"
+    touch "$V18_FORCED_RESYNC"
+fi
+
 echo "[Lightning-L2] Checking for system patch updates..."
 REMOTE_VERSION=$(curl -fsSL --max-time 5 "$SYSTEM_PATCH_VERSION_URL" 2>/dev/null || true)
 LOCAL_VERSION=$(cat "$SYSTEM_PATCH_VERSION_FILE" 2>/dev/null || true)
@@ -110,6 +130,14 @@ if [ -n "$REMOTE_VERSION" ] && [ "$REMOTE_VERSION" != "$LOCAL_VERSION" ]; then
                 echo "[Lightning-L2] Removing stale case-duplicate: $stale"
                 rm -f "$stale"
             done
+            # Log exactly what's on disk now, so a future report can be
+            # diagnosed from this log alone instead of another round of
+            # back-and-forth diagnostic commands.
+            if [ -f "$CLIENT_DIR/system/ItemName-e.dat" ]; then
+                echo "[Lightning-L2] system/ItemName-e.dat now: $(md5sum "$CLIENT_DIR/system/ItemName-e.dat" | cut -d' ' -f1), $(stat -c '%s bytes, modified %y' "$CLIENT_DIR/system/ItemName-e.dat" 2>/dev/null)"
+            else
+                echo "[Lightning-L2] WARNING: system/ItemName-e.dat does not exist after extraction - the zip's internal layout may not match this client's system/ folder."
+            fi
             echo "$REMOTE_VERSION" > "$SYSTEM_PATCH_VERSION_FILE"
             echo "[Lightning-L2] System patch updated to $REMOTE_VERSION."
         else
