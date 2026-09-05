@@ -12,7 +12,7 @@ Download the latest `.deb` from [lightning-l2.com/downloads/lightning-l2-launche
 sudo apt install ./lightning-l2-launcher.deb
 ```
 
-Launch **Lightning-L2** from your applications menu. First run asks for your client folder (the one containing `system\l2.exe` — a genuine High Five (CT2.6) client, get it from [lineage2.org.uk](https://www.lineage2.org.uk/?wpdmdl=126) if you don't have one), then does one-time setup (~250MB download, a few minutes). Every launch after that is instant.
+Launch **Lightning-L2** from your applications menu. First run looks for a Lineage II High Five client on your computer; if it doesn't find one (the most common first-run snag — people often download only the launcher), it offers to fetch the genuine, unmodified client from [lineage2.org.uk](https://www.lineage2.org.uk/?wpdmdl=126) automatically (~5.6GB, one-time) into `~/Downloads/Lineage2`, or you can point it at a client folder you already have. Either way, setup then does its own one-time environment setup (~250MB download, a few minutes). Every launch after that is instant.
 
 Multiboxing works fine — launch a second time after the first instance is up to play a second account.
 
@@ -43,7 +43,7 @@ None of these are Lightning-L2-specific bugs — they're generic "old D3D9 Windo
 
 - **Logs**: every launch writes to `~/.local/share/lightning-l2/logs/launch_<timestamp>.log` (last 10 kept) — check the most recent one first. A `Terminal=true` window can close before you can read it; the log survives regardless.
 - **"Lightning-L2 is already starting" on a fresh launch**: a previous attempt's lock (`~/.local/share/lightning-l2/.launch.lock`) didn't release — this shouldn't happen in normal use (the lock releases automatically ~8s into a healthy launch, or when the wine process exits); if it does, make sure no wine/l2.bin process is still running (`ps aux | grep wine`) and retry.
-- **Reset everything**: `rm -rf ~/.local/share/lightning-l2 ~/.config/lightning-l2` and relaunch — this re-triggers first-run setup from scratch, including re-asking for your client folder.
+- **Reset everything**: `rm -rf ~/.local/share/lightning-l2 ~/.config/lightning-l2` and relaunch — this re-triggers first-run setup from scratch. If you'd used the automatic client download before, it's still sitting in `~/Downloads/Lineage2` and setup finds it again on its own, without a second 5.6GB download.
 - Something else: open an issue here with the relevant `launch_*.log`, or ask in the [Discord](https://discord.gg/dshrJbxfS).
 
 ## Building from source
