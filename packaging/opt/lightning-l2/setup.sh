@@ -10,6 +10,10 @@ WINE_GE_URL="https://github.com/GloriousEggroll/wine-ge-custom/releases/download
 DXVK_URL="https://github.com/doitsujin/dxvk/releases/download/v2.3.1/dxvk-2.3.1.tar.gz"
 SYSTEM_PATCH_URL="https://lightning-l2.com/lightning-l2-system.zip"
 SYSTEM_PATCH_VERSION_URL="https://lightning-l2.com/lightning-l2-system-version.txt"
+# The genuine, unmodified base client - same file connect.html links to.
+# We don't host or modify this; it's just automated here so players who
+# only grabbed the launcher (a common mistake) don't hit a dead end.
+CLIENT_URL="https://www.lineage2.org.uk/?wpdmdl=126"
 # -------------------------------------------------------------------
 
 INSTALL_DIR="$HOME/.local/share/lightning-l2"
@@ -24,17 +28,118 @@ mkdir -p "$INSTALL_DIR" "$CONFIG_DIR"
 
 log() { echo "[Lightning-L2 setup] $*"; }
 
-# --- 1. Ask for the client folder if we don't already know it ---
-if [ ! -f "$CONFIG_FILE" ] || ! grep -q '^CLIENT_DIR=' "$CONFIG_FILE" 2>/dev/null; then
-    CLIENT_DIR=$(zenity --file-selection --directory \
-        --title="Select your Lineage II High Five client folder" 2>/dev/null) || {
-        zenity --error --text="Setup cancelled - no client folder selected." 2>/dev/null
-        exit 1
-    }
+# Where an auto-downloaded client lands - the standard Downloads folder
+# when available (xdg-user-dirs), falling back to ~/Downloads otherwise.
+DOWNLOAD_BASE=$(xdg-user-dir DOWNLOAD 2>/dev/null || true)
+[ -z "$DOWNLOAD_BASE" ] && DOWNLOAD_BASE="$HOME/Downloads"
+CLIENT_DL_DIR="$DOWNLOAD_BASE/Lineage2"
 
-    if [ ! -f "$CLIENT_DIR/system/l2.exe" ] && [ ! -f "$CLIENT_DIR/LineageII.exe" ]; then
-        zenity --error --text="That folder doesn't look like a Lineage II client (no l2.exe/LineageII.exe found). Please point to the folder containing 'system\\l2.exe'." 2>/dev/null
-        exit 1
+# Case-insensitive: different client packages ship system/l2.exe under
+# either casing, and a Linux filesystem cares. Returning nothing found is
+# the normal case (first run, no client yet) - every call site below
+# guards this with `|| true` since set -e is active script-wide and would
+# otherwise treat "nothing found" as a fatal error and abort setup.
+find_client_root() {
+    local exe
+    [ -d "$1" ] || return 1
+    exe=$(find "$1" -maxdepth 4 -ipath "*/system/l2.exe" 2>/dev/null | head -n1) || true
+    [ -n "$exe" ] && dirname "$(dirname "$exe")"
+}
+
+# --- 1. Locate (or fetch) the player's Lineage II client folder ---
+if [ ! -f "$CONFIG_FILE" ] || ! grep -q '^CLIENT_DIR=' "$CONFIG_FILE" 2>/dev/null; then
+    # A previous auto-download can still be on disk even with no config
+    # (e.g. after the troubleshooting guide's "reset everything") - reuse
+    # it instead of fetching 6GB again.
+    CLIENT_DIR=$(find_client_root "$CLIENT_DL_DIR") || true
+
+    if [ -z "$CLIENT_DIR" ] && zenity --question --title="Lightning-L2 setup" \
+        --text="No Lineage II client was found on this computer.\n\nMost players who get stuck here downloaded only the launcher and skipped the base game client - it's a separate ~5.6GB download that Lightning-L2 doesn't bundle.\n\nDownload it automatically now?" \
+        --ok-label="Download it for me (~5.6GB)" --cancel-label="I already have it" 2>/dev/null; then
+
+        AVAIL_KB=$(df --output=avail -k "$DOWNLOAD_BASE" 2>/dev/null | tail -n1) || true
+        REQUIRED_KB=$((14 * 1024 * 1024))  # zip + extracted copy, with margin
+        if [ -z "$AVAIL_KB" ] || [ "$AVAIL_KB" -lt "$REQUIRED_KB" ]; then
+            zenity --error --text="Not enough free space in $DOWNLOAD_BASE for the client download (need ~14GB free). Free up space and try again, or point Lightning-L2 at a client you already have." 2>/dev/null
+        else
+            mkdir -p "$CLIENT_DL_DIR"
+            ZIP_PATH="$CLIENT_DL_DIR/lineage2-highfive-client.zip"
+
+            # `|| true` throughout this block: set -e/pipefail are active
+            # script-wide, and a failure here (or in curl/unzip below) must
+            # fall through to this block's own status checks and error
+            # dialogs, not silently kill the whole setup mid-progress-bar.
+            CONTENT_LEN=$(curl -sIL --max-time 20 "$CLIENT_URL" 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower($1)=="content-length"{v=$2} END{print v}') || true
+
+            # -C - resumes a partial download from a prior cancelled/failed
+            # attempt instead of restarting the ~5.6GB transfer from zero.
+            curl -fSL -C - -o "$ZIP_PATH" "$CLIENT_URL" &
+            CURL_PID=$!
+            (
+                while kill -0 "$CURL_PID" 2>/dev/null; do
+                    CUR=$(stat -c%s "$ZIP_PATH" 2>/dev/null || echo 0)
+                    if [ -n "$CONTENT_LEN" ] && [ "$CONTENT_LEN" -gt 0 ] 2>/dev/null; then
+                        PCT=$(( CUR * 100 / CONTENT_LEN ))
+                        [ "$PCT" -gt 99 ] && PCT=99
+                    else
+                        PCT=50
+                    fi
+                    echo "$PCT"
+                    echo "# Downloading Lineage II client: $(( CUR / 1024 / 1024 ))MB$( [ -n "$CONTENT_LEN" ] && echo "/$(( CONTENT_LEN / 1024 / 1024 ))MB" )"
+                    sleep 1
+                done
+                # Always land on 100 so --auto-close actually closes the
+                # dialog - a stall on some percent under 100 would leave it
+                # sitting open, blocking the rest of setup on a manual close.
+                echo "100"; echo "# Download complete."
+            ) | zenity --progress --title="Lightning-L2 setup" --text="Starting download..." --percentage=0 --width=460 --auto-close 2>/dev/null || true
+            CURL_STATUS=0
+            wait "$CURL_PID" || CURL_STATUS=$?
+
+            if [ "$CURL_STATUS" -ne 0 ]; then
+                rm -f "$ZIP_PATH"
+                zenity --error --text="Downloading the client failed (network error or the mirror is unreachable). Please download it manually from lineage2.org.uk and point Lightning-L2 at that folder instead." 2>/dev/null
+            elif ! unzip -tq "$ZIP_PATH" >/dev/null 2>&1; then
+                rm -f "$ZIP_PATH"
+                zenity --error --text="The downloaded client file was corrupted. Please try again, or download it manually from lineage2.org.uk." 2>/dev/null
+            else
+                unzip -oq "$ZIP_PATH" -d "$CLIENT_DL_DIR" &
+                UNZIP_PID=$!
+                (
+                    while kill -0 "$UNZIP_PID" 2>/dev/null; do
+                        echo "# Extracting client files - this takes a few minutes..."
+                        sleep 1
+                    done
+                    echo "100"
+                ) | zenity --progress --title="Lightning-L2 setup" --text="Extracting client..." --pulsate --auto-close --width=420 2>/dev/null || true
+                UNZIP_STATUS=0
+                wait "$UNZIP_PID" || UNZIP_STATUS=$?
+
+                if [ "$UNZIP_STATUS" -eq 0 ]; then
+                    rm -f "$ZIP_PATH"
+                    CLIENT_DIR=$(find_client_root "$CLIENT_DL_DIR") || true
+                fi
+
+                if [ -z "$CLIENT_DIR" ]; then
+                    zenity --error --text="The downloaded client didn't extract correctly. Please download it manually from lineage2.org.uk and point Lightning-L2 at that folder instead." 2>/dev/null
+                fi
+            fi
+        fi
+    fi
+
+    # Either auto-detection/download above found nothing, or the player
+    # chose "I already have it" - fall back to asking directly.
+    if [ -z "$CLIENT_DIR" ]; then
+        CLIENT_DIR=$(zenity --file-selection --directory \
+            --title="Select your Lineage II High Five client folder" 2>/dev/null) || {
+            zenity --error --text="Setup cancelled - no client folder selected." 2>/dev/null
+            exit 1
+        }
+
+        if [ ! -f "$CLIENT_DIR/system/l2.exe" ] && [ ! -f "$CLIENT_DIR/LineageII.exe" ]; then
+            zenity --error --text="That folder doesn't look like a Lineage II client (no l2.exe/LineageII.exe found). Please point to the folder containing 'system\\l2.exe'." 2>/dev/null
+            exit 1
+        fi
     fi
 
     echo "CLIENT_DIR=$CLIENT_DIR" > "$CONFIG_FILE"
