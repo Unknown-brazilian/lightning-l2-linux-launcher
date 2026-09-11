@@ -214,6 +214,38 @@ INSTANCES_DIR="$INSTALL_DIR/instances"
 mkdir -p "$INSTANCES_DIR"
 MAIN_PREFIX="$WINEPREFIX"
 MAX_SLOTS=6
+
+# Adopt any client still running from before this slot-tracking mechanism
+# existed (i.e. started by an older launcher version, still open when the
+# player updated) into slots 1-2. Without this, such a process holds no
+# slot lock, a genuinely new launch sees slots 1-2 as "free", and lands as
+# an untracked 3rd process sharing the main prefix - exactly the crash
+# above, just reached through the update gap instead of a 3rd deliberate
+# launch. Detected by matching WINEPREFIX in each running l2.bin's own
+# environment against the main prefix (only slots 1-2 ever use it, so at
+# most 2 candidates); each match gets a small background holder that keeps
+# that slot's lock claimed for as long as the real process stays alive,
+# then exits on its own - the adopted process itself is never touched.
+for pid in $(pgrep -x l2.bin 2>/dev/null); do
+    [ -r "/proc/$pid/environ" ] || continue
+    PID_PREFIX=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | sed -n 's/^WINEPREFIX=//p')
+    [ "$PID_PREFIX" = "$MAIN_PREFIX" ] || continue
+    (
+        for i in 1 2; do
+            exec {ADOPT_FD}>"$INSTANCES_DIR/slot-$i.lock"
+            if flock -n "$ADOPT_FD"; then
+                while kill -0 "$pid" 2>/dev/null; do sleep 5; done
+                exit 0
+            fi
+            exec {ADOPT_FD}>&-
+        done
+    ) &
+    disown
+done
+# Give adoption attempts a moment to actually acquire their flock before
+# this launch's own slot loop below starts racing them for slots 1-2.
+sleep 0.5
+
 SLOT=0
 for i in $(seq 1 "$MAX_SLOTS"); do
     exec {SLOT_FD}>"$INSTANCES_DIR/slot-$i.lock"
