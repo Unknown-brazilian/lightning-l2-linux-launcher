@@ -192,6 +192,56 @@ if [ ! -f "$SHORTCUT_ASKED" ]; then
     fi
 fi
 
+# --- Multi-instance slot assignment ---
+# Slots 1-2 share the single main prefix (years of successful dual-boxing
+# on it, untouched by this change). A 3rd instance sharing that same
+# prefix reliably crashes on launch: the client binary is wrapped in
+# WinLicense (Oreans) anti-tamper protection, and whatever code path it
+# takes on noticing a 3rd sibling sharing Wine's named-object namespace
+# computes a bad jump target under Wine and segfaults before a window
+# even opens - confirmed live via WINEDEBUG=+seh,+exception tracing
+# (EXCEPTION_PRIV_INSTRUCTION immediately followed by an
+# EXCEPTION_ACCESS_VIOLATION at a garbage address, then Wine's own
+# unwinder giving up with "Exception frame is not in stack limits"). This
+# is inside the protected binary itself, not something fixable by patching
+# our own launcher's Wine invocation - so slot 3+ instead gets its own
+# fully isolated WINEPREFIX, which sidesteps the shared-namespace trigger
+# entirely without touching the protected binary at all. Each such prefix
+# is created once, lazily, as a copy of the fully set-up main prefix (so
+# it already has DXVK/msxml/etc. applied), then reused on every later
+# launch that lands in that same slot.
+INSTANCES_DIR="$INSTALL_DIR/instances"
+mkdir -p "$INSTANCES_DIR"
+MAIN_PREFIX="$WINEPREFIX"
+MAX_SLOTS=6
+SLOT=0
+for i in $(seq 1 "$MAX_SLOTS"); do
+    exec {SLOT_FD}>"$INSTANCES_DIR/slot-$i.lock"
+    if flock -n "$SLOT_FD"; then
+        SLOT=$i
+        break
+    fi
+    exec {SLOT_FD}>&-
+done
+
+if [ "$SLOT" -eq 0 ]; then
+    echo "[Lightning-L2] $MAX_SLOTS clients are already running - close one before starting another."
+    zenity --error --title="Lightning-L2" --text="$MAX_SLOTS Lightning-L2 clients are already running. Close one before starting another." 2>/dev/null || true
+    exit 1
+fi
+echo "[Lightning-L2] Instance slot: $SLOT"
+
+if [ "$SLOT" -le 2 ]; then
+    WINEPREFIX="$MAIN_PREFIX"
+else
+    WINEPREFIX="$INSTALL_DIR/prefix-slots/box$SLOT"
+    if [ ! -d "$WINEPREFIX" ]; then
+        echo "[Lightning-L2] First launch in slot $SLOT - cloning an isolated Wine prefix (one-time, ~1.3GB)..."
+        mkdir -p "$INSTALL_DIR/prefix-slots"
+        cp -a "$MAIN_PREFIX" "$WINEPREFIX"
+    fi
+fi
+
 # --- Launch ---
 export WINEPREFIX
 export WINEDLLOVERRIDES="d3d9=n"
